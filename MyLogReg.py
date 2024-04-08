@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import random
 
 class MyLogReg:
@@ -25,7 +26,7 @@ class MyLogReg:
     
     def fit(self, X, y, verbose=False):
         random.seed(self.random_state)
-        
+
         n, n_feats = len(y), X.shape[1]+1
         I = np.ones(n)
         X = np.c_[I, X]
