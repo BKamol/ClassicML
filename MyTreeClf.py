@@ -10,7 +10,7 @@ class Node:
         
 
 class MyTreeClf:
-    def __init__(self, max_depth=5, min_samples_split=2, max_leafs=20, bins=None):
+    def __init__(self, max_depth=5, min_samples_split=2, max_leafs=20, bins=None, criterion='entropy'):
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
         self.max_leafs = max_leafs
@@ -19,6 +19,7 @@ class MyTreeClf:
         self.root = None
         self.bins = bins
         self.splitters = None
+        self.criterion = criterion
 
 
     def __repr__(self):
@@ -46,15 +47,26 @@ class MyTreeClf:
         S = -p0*np.log2(p0+1e-15) - p1*np.log2(p1+1e-15)
         return S
 
+    def _gini(self, col_targ):
+        p0 = (col_targ.iloc[:, 1] == 0).sum() / (col_targ.shape[0] + 1e-15)
+        p1 = col_targ.iloc[:, 1].sum() / (col_targ.shape[0] + 1e-15)
+        G = 1 - p0**2 - p1**2
+        return G
+
     def _get_ig(self, x, y, split):
         col_targ = pd.concat([x, y], axis=1)
-        S0 = self._entropy(col_targ)
 
         left_sub = col_targ.loc[col_targ[x.name] <= split, :]
         right_sub = col_targ.loc[col_targ[x.name] > split, :]
-        S1, S2 = self._entropy(left_sub), self._entropy(right_sub)
 
-        IG = S0 - left_sub.shape[0]/(col_targ.shape[0] + 1e-15)*S1 - right_sub.shape[0]/(col_targ.shape[0] + 1e-15)*S2
+        if self.criterion == 'gini':
+            Gp = self._gini(col_targ)
+            Gl, Gr = self._gini(left_sub), self._gini(right_sub)
+            IG = Gp - left_sub.shape[0]/(col_targ.shape[0] + 1e-15)*Gl - right_sub.shape[0]/(col_targ.shape[0] + 1e-15)*Gr
+        else:
+            S0 = self._entropy(col_targ)
+            S1, S2 = self._entropy(left_sub), self._entropy(right_sub)
+            IG = S0 - left_sub.shape[0]/(col_targ.shape[0] + 1e-15)*S1 - right_sub.shape[0]/(col_targ.shape[0] + 1e-15)*S2
         return IG
         
 
@@ -101,7 +113,7 @@ class MyTreeClf:
         right_sub = col_targ.loc[col_targ[best_col] > best_split, :]
 
         if self.is_leaf(left_sub, depth):
-            value = left_sub.iloc[:, -1].sum() / left_sub.shape[0] if left_sub.shape[0] else 0
+            value = left_sub.iloc[:, -1].sum() / (left_sub.shape[0] + 1e-15)
             root.left = Node(('left', value))
             self.leafs_cnt += 1
         else:
@@ -109,7 +121,7 @@ class MyTreeClf:
             root.left = self._fit(X, y, depth+1)
 
         if self.is_leaf(right_sub, depth):
-            value = right_sub.iloc[:, -1].sum() / right_sub.shape[0] if right_sub.shape[0] else 0
+            value = right_sub.iloc[:, -1].sum() / (right_sub.shape[0] + 1e-15)
             root.right = Node(('right', value))
             self.leafs_cnt += 1
         else:
@@ -168,6 +180,8 @@ class MyTreeClf:
     
     def sum_leafs(self):
         return self._sum_leafs(self.root)
+
+
 
 
 
