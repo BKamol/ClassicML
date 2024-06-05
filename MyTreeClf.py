@@ -21,6 +21,8 @@ class MyTreeClf:
         self.splitters = None
         self.criterion = criterion
 
+        self.fi = {}
+
 
     def __repr__(self):
         return f"MyTreeClf class: max_depth={self.max_depth}, min_samples_split={self.min_samples_split}, max_leafs={self.max_leafs}"
@@ -98,6 +100,11 @@ class MyTreeClf:
                (data.shape[0] < self.min_samples_split) or\
                (self.leafs_cnt >= self.max_leafs-1)
 
+    def _get_I(self, data):
+        if self.criterion == 'gini':
+            return self._gini(data)
+        return self._entropy(data)
+
     
     def _fit(self, X, y, depth=0):
         best_col, best_split, best_ig = self._get_best_split(X, y)
@@ -105,12 +112,19 @@ class MyTreeClf:
         #print(best_col, best_split, best_ig)
         col_targ = pd.concat([X, y], axis=1)
 
+
         if (best_col is None):
             value = col_targ.iloc[:, -1].sum() / col_targ.shape[0]
             return Node(('leaf', value))
 
         left_sub = col_targ.loc[col_targ[best_col] <= best_split, :]
         right_sub = col_targ.loc[col_targ[best_col] > best_split, :]
+
+        Np, Nl, Nr = (X.shape[0] + 1e-15), left_sub.shape[0], right_sub.shape[0]
+        col_for_I = [list(col_targ.columns).index(best_col), -1]
+        Ip, Il, Ir = self._get_I(col_targ.iloc[:, col_for_I]), self._get_I(left_sub.iloc[:, col_for_I]), self._get_I(right_sub.iloc[:, col_for_I])
+        FI = Np*(Ip - Nl/Np*Il - Nr/Np*Ir)
+        self.fi[best_col] += FI
 
         if self.is_leaf(left_sub, depth):
             value = left_sub.iloc[:, -1].sum() / (left_sub.shape[0] + 1e-15)
@@ -131,7 +145,9 @@ class MyTreeClf:
 
     def fit(self, X, y):
         self._get_splitters_wbins(X, y)
+        self.fi = {col: 0 for col in X.columns}
         self.root = self._fit(X, y)
+        self.fi = {col: self.fi[col]/X.shape[0] for col in X.columns}
 
     
     def _predict_proba(self, x, root):
