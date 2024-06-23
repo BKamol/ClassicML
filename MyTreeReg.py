@@ -1,140 +1,140 @@
-import numpy as np
-import pandas as pd
-
-
 class Node:
-    def __init__(self, value, left=None, right=None):
-        self.value = value
-        self.left = left
-        self.right = right
-        
+    def __init__(self):
+        self.feature = None
+        self.value_split = None
+        self.value_leaf = None
+        self.side = None
+        self.left = None
+        self.right = None
 
 class MyTreeReg:
-    def __init__(self, max_depth=5, min_samples_split=2, max_leafs=20):
+    def __init__(self, max_depth=5, min_samples_split=2, max_leafs=20, bins=None, criterion='entropy'):
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
         self.max_leafs = max_leafs
+        self.leafs_cnt = 1
+        self.bins = bins
+        self.__sum_tree_values = 0
+        self.split_values = {}
+        self.criterion = criterion
+        self.fi = {}
 
-        self.leafs_cnt = 0
-        self.root = None
-
-    def __repr__(self):
-        return f"MyTreeReg class: max_depth={self.max_depth}, min_samples_split={self.min_samples_split}, max_leafs={self.max_leafs}"
-
-
-    def _get_splitters(self, x):
-        values = np.array(sorted(x.unique()))
-        splitters = [(values[i] + values[i+1]) / 2 for i in range(len(values)-1)]
-        return np.array(splitters)
-
-    def _get_mse(self, col_targ):
-        y = col_targ.iloc[:, -1]
-        return np.sum((y - y.mean())**2) / (len(y) + 1e-15)
-
-    def _get_ig(self, x, y, split):
-        col_targ = pd.concat([x, y], axis=1)
-
-        left_sub = col_targ.loc[col_targ[x.name] <= split, :]
-        right_sub = col_targ.loc[col_targ[x.name] > split, :]
-
-        Np, Nl, Nr = col_targ.shape[0], left_sub.shape[0], right_sub.shape[0]
-        MSEp, MSEl, MSEr = self._get_mse(col_targ), self._get_mse(left_sub), self._get_mse(right_sub)
-        IG = MSEp - (Nl/Np*MSEl + Nr/Np*MSEr)
-        return IG
-
-    def _get_best_split(self, X, y):
-        splitters = {col: self._get_splitters(X[col]) for col in X.columns}
-
-        best_col = None
-        best_split = None
-        best_ig = 0
-        for col, splits in splitters.items():
-            igs = np.array([self._get_ig(X[col], y, split) for split in splits])
-            if not len(igs): continue
-            max_ig_idx = igs.argmax()
-            max_ig = igs[max_ig_idx]
-            max_split = splits[max_ig_idx]
-            if max_ig > best_ig:
-                best_col = col
-                best_split = max_split
-                best_ig = max_ig
-        return best_col, best_split, best_ig
-
-    def is_leaf(self, data, depth):
-        return (data.iloc[:, -1].unique().shape[0] <= 1) or\
-               (depth >= self.max_depth-1) or\
-               (data.shape[0] < self.min_samples_split-1) or\
-               (self.leafs_cnt >= self.max_leafs-1)
-    
-    def _fit(self, X, y, depth=0):
-        best_col, best_split, best_if = self._get_best_split(X, y)
-        root = Node((best_col, best_split))
-
-        col_targ = pd.concat([X, y], axis=1)
-
-        left_sub = col_targ.loc[col_targ[best_col] <= best_split, :]
-        right_sub = col_targ.loc[col_targ[best_col] > best_split, :]
-
-        if self.is_leaf(left_sub, depth):
-            value = left_sub.iloc[:, -1].mean()
-            root.left = Node(('left', value))
-            self.leafs_cnt += 1
-        else:
-            X, y = left_sub.drop(left_sub.columns[-1], axis=1), left_sub.iloc[:, -1] 
-            root.left = self._fit(X, y, depth+1)
-
-        if self.is_leaf(right_sub, depth):
-            value = right_sub.iloc[:, -1].mean()
-            root.right = Node(('right', value))
-            self.leafs_cnt += 1
-        else:
-            X, y = right_sub.drop(right_sub.columns[-1], axis=1), right_sub.iloc[:, -1]
-            root.right = self._fit(X, y, depth+1)
-
-        return root
-            
     def fit(self, X, y):
-        self.root = self._fit(X, y)
+        self.tree = None
+        self.fi = { col: 0 for col in X.columns }
+        
+        def create_tree(root, X_root, y_root, side='root', depth=0):
+            if root is None:
+                root = Node()
+            col_name, split_value, ig = self.get_best_split(X_root, y_root)
 
+            mean_value = y_root.mean()
 
-    def _predict(self, x, root):
-        if root.left is None and root.right is None:
-            return root.value[1]
-        if x[root.value[0]] <= root.value[1]:
-            return self._predict(x, root.left)
-        else:
-            return self._predict(x, root.right)
+            if depth >= self.max_depth or \
+              len(y_root) < self.min_samples_split or \
+              (self.leafs_cnt > 1 and self.leafs_cnt >= self.max_leafs):
+                root.side = side
+                root.value_leaf = mean_value
+                self.__sum_tree_values += root.value_leaf
+                return root
+
+            self.fi[col_name] += len(y_root) / len(y) * ig
+
+            X_left = X_root.loc[X_root[col_name] <= split_value]
+            y_left = y_root.loc[X_root[col_name] <= split_value]
+
+            X_right = X_root.loc[X_root[col_name] > split_value]
+            y_right = y_root.loc[X_root[col_name] > split_value]
+
+            if len(X_left) == 0 or len(X_right) == 0:
+                root.side = side
+                root.value_leaf = mean_value
+                self.__sum_tree_values += root.value_leaf
+                return root
+
+            root.feature = col_name
+            root.value_split = split_value
+            self.leafs_cnt += 1
+
+            root.left = create_tree(root.left, X_left, y_left, 'left', depth + 1)
+            root.right = create_tree(root.right, X_right, y_right, 'right', depth + 1)
+
+            return root
+
+        self.tree = create_tree(self.tree, X, y)
 
     def predict(self, X):
-        y_pred = [self._predict(X.iloc[i, :], self.root) for i in range(len(X))]
+        y_pred = []
+        for _, row in X.iterrows():
+            node = self.tree
+            while node.feature is not None:
+                if row[node.feature] <= node.value_split:
+                    node = node.left
+                else:
+                    node = node.right
+            y_pred.append(node.value_leaf)
         return np.array(y_pred)
-
     
-    def _print_tree(self, root, intend):
-        if (root is None):
-            return None
-        
-        feat, split = root.value
-        if (root.left is None and root.right is None):
-            print('  '*intend, end='')
-            print(f"{feat} = {split}")
+    def print_tree(self, node=None, depth=0):
+        if node is None:
+            node = self.tree
+        if node.feature is not None:
+            print(f"{' ' * depth}{node.feature} > {node.value_split}")
+            if node.left is not None:
+                self.print_tree(node.left, depth + 1)
+            if node.right is not None:
+                self.print_tree(node.right, depth + 1)
         else:
-            print('  '*intend, end='')
-            print(f"{feat} > {split}")
+            print(f"{' ' * depth}{node.side} = {node.value_leaf}")
 
-        self._print_tree(root.left, intend+1)
-        self._print_tree(root.right, intend+1)
+    def get_best_split(self, X, y):
+        mse_0 = self.mse(y)
 
-    def print_tree(self):
-        self._print_tree(self.root, 0)
+        col_name = None
+        split_value = None
+        gain = -float('inf')
 
-    def _sum_leafs(self, root):
-        if (root is None):
-            return 0
-        if (root.left is None and root.right is None):
-            return root.value[1]
-        return self._sum_leafs(root.left) + self._sum_leafs(root.right)
+        for col in X.columns:
+            if not (col in self.split_values.keys()):
+                x_unique_values = np.unique(X[col])
+                if self.bins is None or len(x_unique_values) - 1 < self.bins:
+                    self.split_values[col] = np.array([(x_unique_values[i - 1] + \
+                    x_unique_values[i]) / 2 for i in range(1, len(x_unique_values))])
+                else:
+                    _, self.split_values[col] = np.histogram(X[col], bins=self.bins)
+
+            for split_value_i in self.split_values[col]:
+                mask = X[col] <= split_value_i
+                left_split, right_split = y[mask], y[~mask]
+
+                mse_left = self.mse(left_split)
+                mse_right = self.mse(right_split)
+
+                weight_left = len(left_split) / len(y)
+                weight_right = len(right_split) / len(y)
+
+                mse_i = weight_left * mse_left + weight_right * mse_right
+
+                gain_i = mse_0 - mse_i
+                if gain < gain_i:
+                    col_name = col
+                    split_value = split_value_i
+                    gain = gain_i
+
+        return col_name, split_value, gain
+            
+    def mse(self, t):
+        t_mean = np.mean(t)
+        return np.sum((t - t_mean) ** 2) / (len(t)+1e-15)
+    
+    def __node_rule(self, p, split=pd.Series()):
+        if self.criterion == 'entropy':
+            return -np.sum(p * np.log2(p)) if not split.empty else 0
+        elif self.criterion == 'gini':
+            return 1 - np.sum(p ** 2)
+
+    def __str__(self):
+        return f"MyTreeClf class: max_depth={self.max_depth}, min_samples_split={self.min_samples_split}, max_leafs={self.max_leafs}, bins={self.bins}"
     
     def sum_leafs(self):
-        return self._sum_leafs(self.root)
-
+        return self.__sum_tree_values

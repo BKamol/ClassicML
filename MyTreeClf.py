@@ -1,203 +1,146 @@
-import numpy as np
-import pandas as pd
-
-
 class Node:
-    def __init__(self, value, left=None, right=None):
-        self.value = value
-        self.left = left
-        self.right = right
-        
+    def __init__(self):
+        self.feature = None
+        self.value_split = None
+        self.value_leaf = None
+        self.side = None
+        self.left = None
+        self.right = None
 
 class MyTreeClf:
     def __init__(self, max_depth=5, min_samples_split=2, max_leafs=20, bins=None, criterion='entropy'):
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
         self.max_leafs = max_leafs
-
-        self.leafs_cnt = 0
-        self.root = None
+        self.leafs_cnt = 1
         self.bins = bins
-        self.splitters = None
+        self.__sum_tree_values = 0
+        self.split_values = {}
         self.criterion = criterion
-
         self.fi = {}
 
-
-    def __repr__(self):
-        return f"MyTreeClf class: max_depth={self.max_depth}, min_samples_split={self.min_samples_split}, max_leafs={self.max_leafs}"
-
-    def _get_splitters(self, x):
-        values = np.array(sorted(x.unique()))
-        splitters = np.array([(values[i] + values[i+1])/2 for i in range(len(values)-1)])
-        return splitters
-    
-    def _get_splitters_wbins(self, X, y):
-        self.splitters = {}
-        if self.bins:
-            native_splitters = {col: self._get_splitters(X[col]) for col in X.columns}
-            for col, splitters in native_splitters.items():
-                if len(splitters) <= self.bins - 1:
-                    self.splitters[col] = splitters
-                else:
-                    hist = np.histogram(X[col], bins=self.bins)[1][1:-1]
-                    self.splitters[col] = hist
-
-    def _entropy(self, col_targ):
-        p0 = (col_targ.iloc[:, 1] == 0).sum() / (col_targ.shape[0] + 1e-15)
-        p1 = col_targ.iloc[:, 1].sum() / (col_targ.shape[0] + 1e-15)
-        S = -p0*np.log2(p0+1e-15) - p1*np.log2(p1+1e-15)
-        return S
-
-    def _gini(self, col_targ):
-        p0 = (col_targ.iloc[:, 1] == 0).sum() / (col_targ.shape[0] + 1e-15)
-        p1 = col_targ.iloc[:, 1].sum() / (col_targ.shape[0] + 1e-15)
-        G = 1 - p0**2 - p1**2
-        return G
-
-    def _get_ig(self, x, y, split):
-        col_targ = pd.concat([x, y], axis=1)
-
-        left_sub = col_targ.loc[col_targ[x.name] <= split, :]
-        right_sub = col_targ.loc[col_targ[x.name] > split, :]
-
-        if self.criterion == 'gini':
-            Gp = self._gini(col_targ)
-            Gl, Gr = self._gini(left_sub), self._gini(right_sub)
-            IG = Gp - left_sub.shape[0]/(col_targ.shape[0] + 1e-15)*Gl - right_sub.shape[0]/(col_targ.shape[0] + 1e-15)*Gr
-        else:
-            S0 = self._entropy(col_targ)
-            S1, S2 = self._entropy(left_sub), self._entropy(right_sub)
-            IG = S0 - left_sub.shape[0]/(col_targ.shape[0] + 1e-15)*S1 - right_sub.shape[0]/(col_targ.shape[0] + 1e-15)*S2
-        return IG
-        
-
-    def _get_best_split(self, X, y):
-        cols = X.columns
-        if self.bins is None:
-            splitters = {col: self._get_splitters(X[col]) for col in cols}
-        else:
-            splitters = self.splitters
-        best_col = None
-        best_split = None
-        best_ig = 0
-        for col, splits in splitters.items():
-            x = X[col]
-            igs = np.array([self._get_ig(x, y, split) for split in splits])
-            max_idx = igs.argmax()
-            max_ig, max_split = igs[max_idx], splits[max_idx]
-            if max_ig > best_ig:
-                best_col = col
-                best_split = max_split
-                best_ig = max_ig
-        
-        return best_col, best_split, best_ig
-
-    def is_leaf(self, data, depth):
-        return (all(data.iloc[:, -1] == 1)) or\
-               (all(data.iloc[:, -1] == 0)) or\
-               (depth >= self.max_depth-1) or\
-               (data.shape[0] < self.min_samples_split) or\
-               (self.leafs_cnt >= self.max_leafs-1)
-
-    def _get_I(self, data):
-        if self.criterion == 'gini':
-            return self._gini(data)
-        return self._entropy(data)
-
-    
-    def _fit(self, X, y, depth=0):
-        best_col, best_split, best_ig = self._get_best_split(X, y)
-        root = Node((best_col, best_split))
-        #print(best_col, best_split, best_ig)
-        col_targ = pd.concat([X, y], axis=1)
-
-
-        if (best_col is None):
-            value = col_targ.iloc[:, -1].sum() / col_targ.shape[0]
-            return Node(('leaf', value))
-
-        left_sub = col_targ.loc[col_targ[best_col] <= best_split, :]
-        right_sub = col_targ.loc[col_targ[best_col] > best_split, :]
-
-        Np, Nl, Nr = (X.shape[0] + 1e-15), left_sub.shape[0], right_sub.shape[0]
-        col_for_I = [list(col_targ.columns).index(best_col), -1]
-        Ip, Il, Ir = self._get_I(col_targ.iloc[:, col_for_I]), self._get_I(left_sub.iloc[:, col_for_I]), self._get_I(right_sub.iloc[:, col_for_I])
-        FI = Np*(Ip - Nl/Np*Il - Nr/Np*Ir)
-        self.fi[best_col] += FI
-
-        if self.is_leaf(left_sub, depth):
-            value = left_sub.iloc[:, -1].sum() / (left_sub.shape[0] + 1e-15)
-            root.left = Node(('left', value))
-            self.leafs_cnt += 1
-        else:
-            X, y = left_sub.drop(left_sub.columns[-1], axis=1), left_sub.iloc[:, -1]
-            root.left = self._fit(X, y, depth+1)
-
-        if self.is_leaf(right_sub, depth):
-            value = right_sub.iloc[:, -1].sum() / (right_sub.shape[0] + 1e-15)
-            root.right = Node(('right', value))
-            self.leafs_cnt += 1
-        else:
-            X, y = right_sub.drop(right_sub.columns[-1], axis=1), right_sub.iloc[:, -1]
-            root.right = self._fit(X, y, depth+1)
-        return root
-
     def fit(self, X, y):
-        self._get_splitters_wbins(X, y)
-        self.fi = {col: 0 for col in X.columns}
-        self.root = self._fit(X, y)
-        self.fi = {col: self.fi[col]/X.shape[0] for col in X.columns}
-
-    
-    def _predict_proba(self, x, root):
-        if (root.right is None and root.left is None):
-            return root.value[1]
+        self.tree = None
+        self.fi = { col: 0 for col in X.columns }
         
-        feat, split = root.value
-        if x[feat] <= split:
-            return self._predict_proba(x, root.left)
-        else:
-            return self._predict_proba(x, root.right)
+        def create_tree(root, X_root, y_root, side='root', depth=0):
+            if root is None:
+                root = Node()
+            col_name, split_value, ig = self.get_best_split(X_root, y_root)
+
+            proportion_ones = len(y_root[y_root == 1]) / len(y_root) if len(y_root) else 0
+
+            if proportion_ones == 0 or proportion_ones == 1 or depth >= self.max_depth or \
+              len(y_root) < self.min_samples_split or \
+              (self.leafs_cnt > 1 and self.leafs_cnt >= self.max_leafs):
+                root.side = side
+                root.value_leaf = proportion_ones
+                self.__sum_tree_values += root.value_leaf
+                return root
+
+            self.fi[col_name] += len(y_root) / len(y) * ig
+
+            X_left = X_root.loc[X_root[col_name] <= split_value]
+            y_left = y_root.loc[X_root[col_name] <= split_value]
+
+            X_right = X_root.loc[X_root[col_name] > split_value]
+            y_right = y_root.loc[X_root[col_name] > split_value]
+
+            if len(X_left) == 0 or len(X_right) == 0:
+                root.side = side
+                root.value_leaf = proportion_ones
+                self.__sum_tree_values += root.value_leaf
+                return root
+
+            root.feature = col_name
+            root.value_split = split_value
+            self.leafs_cnt += 1
+
+            root.left = create_tree(root.left, X_left, y_left, 'left', depth + 1)
+            root.right = create_tree(root.right, X_right, y_right, 'right', depth + 1)
+
+            return root
+
+        self.tree = create_tree(self.tree, X, y)
 
     def predict_proba(self, X):
-        y_pred_logits = np.array([self._predict_proba(X.iloc[i, :], self.root) for i in range(X.shape[0])])
-        return y_pred_logits
+        for _, row in X.iterrows():
+            node = self.tree
+            while node.feature is not None:
+                if row[node.feature] <= node.value_split:
+                    node = node.left
+                else:
+                    node = node.right
+            yield node.value_leaf
 
     def predict(self, X):
-        y_pred = (self.predict_proba(X) > 0.5).astype(int)
-        return y_pred
+        y_pred = np.array(list(self.predict_proba(X)))
+        return (y_pred >= 0.5).astype(int)
 
-
-    def _print_tree(self, root, intend):
-        if (root is None):
-            return None
-        
-        feat, split = root.value
-        if (root.left is None and root.right is None):
-            print('  '*intend, end='')
-            print(f"{feat} = {split}")
+    def print_tree(self, node=None, depth=0):
+        if node is None:
+            node = self.tree
+        if node.feature is not None:
+            print(f"{' ' * depth}{node.feature} > {node.value_split}")
+            if node.left is not None:
+                self.print_tree(node.left, depth + 1)
+            if node.right is not None:
+                self.print_tree(node.right, depth + 1)
         else:
-            print('  '*intend, end='')
-            print(f"{feat} > {split}")
+            print(f"{' ' * depth}{node.side} = {node.value_leaf}")
 
-        self._print_tree(root.left, intend+1)
-        self._print_tree(root.right, intend+1)
+    def get_best_split(self, X, y):
+        count_labels = y.value_counts()
+        p_zero = count_labels / count_labels.sum()
+        s_zero = self.__node_rule(p_zero)
 
-    def print_tree(self):
-        self._print_tree(self.root, 0)
+        X = X.copy()
+        X.loc[:, 'y'] = y
+        split_values = {}
+        col_name = None
+        split_value = None
+        s_cur_min = float('inf')
 
-    def _sum_leafs(self, root):
-        if (root is None):
-            return 0
-        if (root.left is None and root.right is None):
-            return root.value[1]
-        return self._sum_leafs(root.left) + self._sum_leafs(root.right)
+        for col in X.columns[:-1]:
+            if not (col in self.split_values.keys()):
+                x_unique_values = np.unique(X[col])
+                if self.bins is not None and len(x_unique_values) - 1 >= self.bins:
+                    _, self.split_values[col] = np.histogram(X[col], bins=self.bins)
+                else:
+                    self.split_values[col] = np.array([(x_unique_values[i - 1] + x_unique_values[i]) / 2 for i in range(1, len(x_unique_values))])
+
+            for split_value_cur in self.split_values[col]:
+                left_split = X['y'][X[col] <= split_value_cur]
+                right_split = X['y'][X[col] > split_value_cur]
+
+                left_count_labels = left_split.value_counts()
+                p_left = left_count_labels / left_count_labels.sum()
+                s_left = self.__node_rule(p_left, left_split)
+
+                right_count_labels = right_split.value_counts()
+                p_right = right_count_labels / right_count_labels.sum()
+                s_right = self.__node_rule(p_right, right_split)
+
+                weight_left = len(left_split) / len(y)
+                weight_right = len(right_split) / len(y)
+
+                s_cur = weight_left * s_left + weight_right * s_right
+                if s_cur_min > s_cur:
+                    s_cur_min = s_cur
+                    col_name = col
+                    split_value = split_value_cur
+
+        ig = s_zero - s_cur_min
+        return col_name, split_value, ig
+
+    def __node_rule(self, p, split=pd.Series()):
+        if self.criterion == 'entropy':
+            return -np.sum(p * np.log2(p)) if not split.empty else 0
+        elif self.criterion == 'gini':
+            return 1 - np.sum(p ** 2)
+
+    def __str__(self):
+        return f"MyTreeClf class: max_depth={self.max_depth}, min_samples_split={self.min_samples_split}, max_leafs={self.max_leafs}, bins={self.bins}"
     
     def sum_leafs(self):
-        return self._sum_leafs(self.root)
-
-
-
-
-
+        return self.__sum_tree_values
