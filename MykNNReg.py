@@ -42,6 +42,7 @@ class MyKNNReg:
 
     def predict(self, X):
         y_pred = [self._predict(x) for x in X]
+        return np.array(y_pred)
 
     def _predict(self, x, proba=False):
         dists = [self._distance(x, x_train) for x_train in self.X_train]

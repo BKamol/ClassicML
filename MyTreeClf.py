@@ -67,6 +67,7 @@ class MyTreeClf:
         self.tree = create_tree(self.tree, X, y)
 
     def predict_proba(self, X):
+        y_pred = []
         for _, row in X.iterrows():
             node = self.tree
             while node.feature is not None:
@@ -74,7 +75,8 @@ class MyTreeClf:
                     node = node.left
                 else:
                     node = node.right
-            yield node.value_leaf
+            y_pred.append(node.value_leaf)
+        return np.array(y_pred)
 
     def predict(self, X):
         y_pred = np.array(list(self.predict_proba(X)))
